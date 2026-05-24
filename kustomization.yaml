@@ -1,0 +1,40 @@
+# Kustomize root for the hyperdx ArgoCD Application.
+#
+# This file replaces the old multi-source helm/raw/secret split: argocd
+# now points at a single kustomize source which:
+#   1. Inflates the upstream hdx-oss-v2 chart in-place (helmCharts).
+#   2. Adds the traefik Ingress + the sops-encrypted S3-creds Secret as
+#      sibling resources.
+#   3. Adds a sidecar ConfigMap (clickhouse-storage-config) holding the
+#      `<storage_configuration>` XML — mounted at
+#      /etc/clickhouse-server/config.d/storage.xml.
+#   4. Strategic-merge-patches the chart's clickhouse Deployment to mount
+#      that ConfigMap + envFrom the `hyperdx-s3-credentials` Secret, so
+#      the storage.xml can reference S3 creds via the `from_env` attribute.
+#
+# Requires `kustomize.buildOptions: --enable-helm` in argocd-cm (set by
+# bootstrap repo 03-argocd-ingress.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hyperdx
+
+helmCharts:
+  - name: hdx-oss-v2
+    repo: https://hyperdxio.github.io/helm-charts
+    version: 0.8.4
+    releaseName: hyperdx
+    namespace: hyperdx
+    valuesFile: values/hyperdx.yaml
+
+resources:
+  - manifests/ingress.yaml
+  - manifests/clickhouse-storage-config.yaml
+  - secrets/hyperdx-s3.sops.yaml
+
+patches:
+  - path: manifests/clickhouse-storage-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: hyperdx-hdx-oss-v2-clickhouse

@@ -5,22 +5,29 @@ errors + OTLP traces/logs/metrics + session replay) on volt's k3s cluster.
 Replaces Bugsink.
 
 Single upstream chart: `hyperdxio/hdx-oss-v2`. The chart bundles
-ClickHouse + MongoDB + the HyperDX OTEL collector; this repo only holds
-the values, the traefik Ingress, the S3-cold-storage secret, and the
-`Application` manifest that points ArgoCD at the chart repo.
+ClickHouse + MongoDB + the HyperDX OTEL collector. This repo wraps the
+chart in a kustomize layer (`kustomization.yaml` at the repo root) so we
+can patch the chart-rendered ClickHouse Deployment to add an S3 cold-tier
+storage policy. ArgoCD points at the repo root as a kustomize source;
+the chart is inflated in-place via `kustomize.helmCharts` (requires
+`kustomize.buildOptions: --enable-helm` in `argocd-cm`, set by the
+bootstrap repo).
 
 ## Layout
 
 ```
+kustomization.yaml         # kustomize root: helmCharts + ingress + storage patch
 argocd/
-  hyperdx.yaml         # ArgoCD Application (multi-source: chart + values + manifests + secret)
+  hyperdx.yaml             # ArgoCD Application (single kustomize source)
 values/
-  hyperdx.yaml         # Helm values override
+  hyperdx.yaml             # Helm values override
 manifests/
-  ingress.yaml         # traefik route for hyperdx.volt.tail.avolt.net
+  ingress.yaml             # traefik route for hyperdx.volt.tail.avolt.net
+  clickhouse-storage-config.yaml  # ConfigMap with <storage_configuration> XML
+  clickhouse-storage-patch.yaml   # strategic-merge patch: mounts + envFrom on the CH Deployment
 secrets/
-  hyperdx-s3.sops.yaml # garage S3 creds (sops+age) for ClickHouse cold tier (staged, not yet wired)
-install.sh             # idempotent: applies argocd/hyperdx.yaml
+  hyperdx-s3.sops.yaml     # garage S3 creds (sops+age) for ClickHouse cold tier
+install.sh                 # idempotent: applies argocd/hyperdx.yaml
 ```
 
 ## Public URL
@@ -55,17 +62,59 @@ DSN at `<frontendUrl>/api/v1/sentry/<token>`; this is the value of
 
 ## Storage layout
 
-- ClickHouse hot data on a 10Gi local-path PVC (~7d target retention).
-- MongoDB on a 5Gi local-path PVC (metadata: users, dashboards, alerts).
-- Cold-tier in Garage S3 (`hyperdx-cold` bucket, key `hyperdx`) is
-  **provisioned but not yet wired**. To enable: add a ClickHouse
-  `<storage_configuration>` S3 disk + `tiered` storage policy that
-  envFroms `hyperdx-s3-credentials`, and patch the chart's
-  `clickhouse-config` ConfigMap (chart doesn't expose this natively
-  — likely needs a kustomize overlay or chart fork).
+- **Hot**: ClickHouse local PVC (10Gi, local-path on volt) — fast SSD.
+- **Cold**: Garage S3 bucket `hyperdx-cold` (single-node Garage on volt,
+  tailnet endpoint `http://100.64.0.9:3900`) — slow but cheap. Mounted
+  into ClickHouse as the `cold_s3` disk.
+- **MongoDB**: 5Gi local-path PVC (metadata: users, dashboards, alerts).
+
+### Cold-tier storage policy
+
+`manifests/clickhouse-storage-config.yaml` provides a sidecar
+`<storage_configuration>` XML injected into ClickHouse via
+`/etc/clickhouse-server/config.d/storage.xml`. It declares:
+
+- A `cold_s3` disk pointing at `hyperdx-cold/clickhouse/`, with creds
+  pulled from env vars (`HYPERDX_S3_ACCESS_KEY` /
+  `HYPERDX_S3_SECRET_KEY`) supplied by `envFrom: hyperdx-s3-credentials`.
+- A `tiered` storage policy: `default` (local) → `cold_s3` with
+  `move_factor=0.2`, so ClickHouse migrates oldest parts to S3 when the
+  hot disk is >80% full.
+
+To verify the policy is loaded:
+
+```sh
+ssh volt 'sudo k3s kubectl -n hyperdx exec deploy/hyperdx-hdx-oss-v2-clickhouse -- \
+  clickhouse-client -q "SHOW STORAGE POLICIES"'
+# Expect: default, tiered
+ssh volt 'sudo k3s kubectl -n hyperdx exec deploy/hyperdx-hdx-oss-v2-clickhouse -- \
+  clickhouse-client -q "SELECT name, type FROM system.disks"'
+# Expect: default (local), cold_s3 (s3)
+```
+
+#### Per-table TTL (one-off operator step)
+
+The storage policy makes the cold disk **available**; per-table TTL
+drives the bulk of the migration. HyperDX creates its tables itself
+(default schema), so the TTL has to be applied out-of-band after the
+first ingest. For each large table (`default.otel_logs`,
+`default.otel_traces`, `default.otel_metrics_*`, `default.hyperdx_sessions`):
+
+```sql
+ALTER TABLE default.otel_logs
+  MODIFY SETTING storage_policy = 'tiered';
+ALTER TABLE default.otel_logs
+  MODIFY TTL toDate(Timestamp) + INTERVAL 7 DAY  TO DISK 'cold_s3',
+         toDate(Timestamp) + INTERVAL 90 DAY DELETE;
+```
+
+7 days hot, 90 days cold, then dropped.
 
 ## Out-of-band state
 
 - Garage bucket: `hyperdx-cold` (created via `sudo garage bucket create`).
 - Garage key: `hyperdx` / `GKa753b838512445e634f3bc8e` (read+write on
-  `hyperdx-cold`). Secret encrypted in `secrets/hyperdx-s3.sops.yaml`.
+  `hyperdx-cold`). Secret encrypted in `secrets/hyperdx-s3.sops.yaml`,
+  decrypted by sops-secrets-operator into Secret `hyperdx-s3-credentials`.
+- `argocd-cm` must have `kustomize.buildOptions: --enable-helm` (set
+  cluster-wide by the bootstrap repo) for `kustomize.helmCharts` to work.

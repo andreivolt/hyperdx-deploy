@@ -5,12 +5,11 @@
 # manifests/ingress.yaml mints the traefik route using the mirrored
 # *.volt.tail.avolt.net wildcard cert (same pattern as bugsink).
 #
-# Garage S3 bucket `hyperdx-cold` + key `hyperdx` are provisioned out-of-band
-# (see README). The S3 creds Secret is reconciled from secrets/hyperdx-s3.sops.yaml.
-# Cold-storage tiering into ClickHouse is NOT wired yet — first deploy keeps
-# the chart's default local PVC layout; revising the chart's clickhouse
-# config.xml to add an `<storage_configuration>` S3 disk + a `tiered` policy
-# is a follow-up.
+# Cold-tier (Garage S3, `hyperdx-cold` bucket) is wired via the sibling
+# kustomization.yaml at the repo root: it inflates this chart with
+# helmCharts and then strategic-merge-patches the clickhouse Deployment to
+# mount a `<storage_configuration>` sidecar ConfigMap + envFrom the
+# `hyperdx-s3-credentials` Secret. See README "Cold-tier storage".
 
 global:
   storageClassName: local-path

@@ -11,36 +11,15 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: hyperdx
-  sources:
-    # 1. Upstream chart. hdx-oss-v2 bundles ClickHouse + MongoDB + the
-    #    HyperDX OTEL collector all in one release.
-    - repoURL: https://hyperdxio.github.io/helm-charts
-      chart: hdx-oss-v2
-      targetRevision: 0.8.4
-      helm:
-        releaseName: hyperdx
-        valueFiles:
-          - $values/values/hyperdx.yaml
-    # 2. This repo's values/ tree, referenced by valueFiles above.
-    - repoURL: https://github.com/andreivolt/hyperdx-deploy
-      targetRevision: main
-      ref: values
-    # 3. Sibling manifest source: the traefik Ingress for
-    #    hyperdx.volt.tail.avolt.net. The chart's own ingress is disabled
-    #    in values/hyperdx.yaml.
-    - repoURL: https://github.com/andreivolt/hyperdx-deploy
-      targetRevision: main
-      path: manifests
-    # 4. SopsSecret with the Garage S3 access keys for cold storage
-    #    (decrypted by sops-secrets-operator into `hyperdx-s3-credentials`).
-    #    Not yet wired into ClickHouse's storage_configuration — the
-    #    Secret is staged here so the follow-up that adds tiering can
-    #    envFrom it without another bucket/key round-trip.
-    - repoURL: https://github.com/andreivolt/hyperdx-deploy
-      targetRevision: main
-      path: secrets
-      directory:
-        include: hyperdx-s3.sops.yaml
+  # Single kustomize source: the repo root holds a kustomization.yaml
+  # that (a) inflates the hdx-oss-v2 Helm chart via `helmCharts:` and
+  # (b) layers the traefik Ingress + the S3-cold-tier storage config /
+  # patch / sops-secret on top. Requires `kustomize.buildOptions:
+  # --enable-helm` in argocd-cm (set by the bootstrap repo).
+  source:
+    repoURL: https://github.com/andreivolt/hyperdx-deploy
+    targetRevision: main
+    path: .
   syncPolicy:
     automated:
       prune: false

@@ -1,0 +1,78 @@
+# Sidecar ConfigMap holding ClickHouse's <storage_configuration> block.
+# Mounted into the clickhouse pod at /etc/clickhouse-server/config.d/storage.xml
+# via the strategic-merge patch in clickhouse-storage-patch.yaml. ClickHouse
+# auto-loads everything under config.d/ on startup.
+#
+# Storage layout:
+#   - disk `default`       : local PVC (chart-managed, /var/lib/clickhouse)
+#   - disk `cold_s3`       : Garage S3 bucket `hyperdx-cold` over the tailnet
+#   - policy `tiered`      : default → cold_s3 with move_factor 0.2
+#     => once the local disk is >80% full ClickHouse migrates oldest parts
+#        onto S3 automatically. Per-table TTL (operator-applied below) keeps
+#        the hot disk to ~7 days and the cold disk to ~90 days.
+#
+# Operator follow-up (one-off; HyperDX creates tables itself, so we can't
+# bake this into the chart):
+#
+#   ALTER TABLE default.otel_logs
+#     MODIFY SETTING storage_policy = 'tiered';
+#   ALTER TABLE default.otel_logs
+#     MODIFY TTL toDate(Timestamp) + INTERVAL 7 DAY
+#                   TO DISK 'cold_s3',
+#            toDate(Timestamp) + INTERVAL 90 DAY DELETE;
+#   -- repeat for default.otel_traces, default.otel_metrics_*, default.hyperdx_sessions
+#
+# Without the per-table TTL, the policy only kicks in on disk pressure
+# (move_factor) — which is still a useful safety valve.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hyperdx-clickhouse-storage-config
+data:
+  storage.xml: |
+    <?xml version="1.0"?>
+    <clickhouse>
+      <storage_configuration>
+        <disks>
+          <cold_s3>
+            <type>s3</type>
+            <!--
+              Garage S3 endpoint on volt's tailnet. Pods reach the host's
+              tailnet IP directly (k3s pod CIDR → volt firewall accepts on
+              port 3900, see modules/nixos/garage.nix). Same pattern used
+              by tempo + velero.
+              The trailing slash + bucket prefix is required — ClickHouse
+              treats this as an "endpoint URL", not just a host:port.
+            -->
+            <endpoint>http://100.64.0.9:3900/hyperdx-cold/clickhouse/</endpoint>
+            <region>garage</region>
+            <!-- Garage doesn't do virtual-host buckets. -->
+            <use_environment_credentials>false</use_environment_credentials>
+            <access_key_id from_env="HYPERDX_S3_ACCESS_KEY"/>
+            <secret_access_key from_env="HYPERDX_S3_SECRET_KEY"/>
+            <!-- Garage uses path-style addressing. -->
+            <metadata_path>/var/lib/clickhouse/disks/cold_s3/</metadata_path>
+            <skip_access_check>false</skip_access_check>
+            <support_batch_delete>false</support_batch_delete>
+          </cold_s3>
+        </disks>
+        <policies>
+          <tiered>
+            <volumes>
+              <hot>
+                <disk>default</disk>
+              </hot>
+              <cold>
+                <disk>cold_s3</disk>
+              </cold>
+            </volumes>
+            <!--
+              Once the hot volume is >80% full, move the oldest parts
+              over to cold_s3. Per-table TTL (set out-of-band) drives
+              the bulk of the migration; this is the safety valve.
+            -->
+            <move_factor>0.2</move_factor>
+          </tiered>
+        </policies>
+      </storage_configuration>
+    </clickhouse>
