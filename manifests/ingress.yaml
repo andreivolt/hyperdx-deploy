@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hyperdx
+  namespace: hyperdx
+  annotations:
+    # Wildcard *.volt.tail.avolt.net cert is minted in cert-manager and
+    # mirrored into every namespace by reflector — no per-host
+    # cert-manager.io annotation needed.
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - hyperdx.volt.tail.avolt.net
+      secretName: wildcard-tail-avolt-net-tls
+  rules:
+    - host: hyperdx.volt.tail.avolt.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # chart release name = `hyperdx`, fullname appends the
+                # chart name -> `hyperdx-hdx-oss-v2`, and the app Service
+                # gets `-app` suffixed. Frontend listens on port 3000.
+                name: hyperdx-hdx-oss-v2-app
+                port:
+                  number: 3000

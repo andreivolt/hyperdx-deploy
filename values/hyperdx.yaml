@@ -1,0 +1,64 @@
+# hyperdxio/hdx-oss-v2 chart values for volt's k3s cluster.
+#
+# All three storage backends (ClickHouse hot, MongoDB, OTEL collector) run
+# bundled inside the chart. Ingress is disabled here and a sibling
+# manifests/ingress.yaml mints the traefik route using the mirrored
+# *.volt.tail.avolt.net wildcard cert (same pattern as bugsink).
+#
+# Garage S3 bucket `hyperdx-cold` + key `hyperdx` are provisioned out-of-band
+# (see README). The S3 creds Secret is reconciled from secrets/hyperdx-s3.sops.yaml.
+# Cold-storage tiering into ClickHouse is NOT wired yet — first deploy keeps
+# the chart's default local PVC layout; revising the chart's clickhouse
+# config.xml to add an `<storage_configuration>` S3 disk + a `tiered` policy
+# is a follow-up.
+
+global:
+  storageClassName: local-path
+
+hyperdx:
+  # Public-facing URL — embedded in emails, OAuth callbacks, etc.
+  frontendUrl: https://hyperdx.volt.tail.avolt.net
+  nodeSelector:
+    environment: prod
+  ingress:
+    # Sibling manifests/ingress.yaml mints the traefik route.
+    enabled: false
+
+mongodb:
+  enabled: true
+  nodeSelector:
+    environment: prod
+  persistence:
+    enabled: true
+    dataSize: 5Gi
+
+clickhouse:
+  enabled: true
+  nodeSelector:
+    environment: prod
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  persistence:
+    enabled: true
+    # 7d hot retention target — sized for alimcompta + email2pr + monolith.
+    dataSize: 10Gi
+    logSize: 2Gi
+
+otel:
+  enabled: true
+  replicas: 1
+  nodeSelector:
+    environment: prod
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+tasks:
+  enabled: true
