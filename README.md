@@ -17,8 +17,6 @@ bootstrap repo).
 
 ```
 kustomization.yaml         # kustomize root: helmCharts + ingress + storage patch
-argocd/
-  hyperdx.yaml             # ArgoCD Application (single kustomize source)
 values/
   hyperdx.yaml             # Helm values override
 manifests/
@@ -27,8 +25,12 @@ manifests/
   clickhouse-storage-patch.yaml   # strategic-merge patch: mounts + envFrom on the CH Deployment
 secrets/
   hyperdx-s3.sops.yaml     # garage S3 creds (sops+age) for ClickHouse cold tier
-install.sh                 # idempotent: applies argocd/hyperdx.yaml
+install.sh                 # idempotent: applies the bootstrap-side Application manifest
 ```
+
+The ArgoCD `Application` itself lives in
+`~/dev/volt/bootstrap/argocd/apps/hyperdx.yaml` (single source of truth,
+deployed by the cluster's app-of-apps).
 
 ## Public URL
 
