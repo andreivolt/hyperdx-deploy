@@ -1,0 +1,54 @@
+# HyperDX OSS v2 has no anonymous / no-auth / declarative-credentials mode for
+# the standard multi-component deployment (upstream issue hyperdxio/hyperdx#1329
+# is open and unaddressed). Its only auth-less path is IS_LOCAL_MODE, which is a
+# *build-time* NEXT_PUBLIC_IS_LOCAL_MODE baked into the Next.js bundle (the
+# docker.hyperdx.io/hyperdx/hyperdx image hardcodes it to false) and ships as a
+# single all-in-one container that stores everything in browser localStorage —
+# incompatible with this split clickhouse/mongo/otel chart + S3 cold tier. So a
+# runtime IS_LOCAL_MODE_ENABLED env does nothing (an earlier attempt set it; it
+# was inert, the login screen stayed).
+#
+# Instead we get the Grafana-style "open straight into the app" behaviour by
+# injecting a valid HyperDX session cookie at the proxy. HyperDX uses
+# express-session (connect.sid) with a connect-mongo store, rolling:true and a
+# 30-day maxAge — so a single session, server-validated against MongoDB, renews
+# its expiry on every request and never lapses while the host is in use. The
+# andrei@avolt.net user + team are already provisioned in MongoDB; the value
+# below is that user's signed connect.sid (cookie-signature HMAC over the
+# session id with the EXPRESS_SESSION_SECRET, which is unset and so defaults to
+# the upstream constant). customRequestHeaders overrides any cookie the browser
+# sends, so every tailnet request authenticates as andrei with no login form.
+#
+# This is a shared credential in plaintext, identical in posture to Grafana's
+# adminPassword here — safe ONLY because the sibling tailnet-only ipAllowList
+# pins the UI host to the Tailscale CGNAT range. If the session is ever revoked
+# (logout / Mongo wipe), re-mint: read sessions._id from the hyperdx db, then
+#   node -e 'c=require("crypto");s="<sid>";console.log("connect.sid=s%3A"+s+"."+encodeURIComponent(c.createHmac("sha256","hyperdx is cool \u{1F44B}").update(s).digest("base64").replace(/=+$/,"")))'
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hyperdx-auto-login
+  namespace: hyperdx
+spec:
+  headers:
+    customRequestHeaders:
+      Cookie: "connect.sid=s%3Ae1Q5TWRjowijU3peo2Q8NATVd8P0-4Cg.d4UV5MYwiHR7YLwCs0PdxGpCe6XXd3%2B8RzIXW3AYtec"
+---
+# Defense in depth: the auto-login cookie above hands a real session to anyone
+# who can reach this host, so pin the UI host to tailnet IPs (Tailscale CGNAT +
+# in-cluster ranges for health probes). Same middleware the dashboard / preview
+# hosts use. NOTE: this is attached to the `hyperdx` UI ingress only — the
+# sibling `hyperdx-otel` ingress (public OTLP ingest at otel.alimcompta.avolt.net)
+# is intentionally public and must NOT get either middleware.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tailnet-only
+  namespace: hyperdx
+spec:
+  ipAllowList:
+    sourceRange:
+      - 100.64.0.0/10
+      - 127.0.0.1/32
+      - 10.42.0.0/16
+      - 10.43.0.0/16

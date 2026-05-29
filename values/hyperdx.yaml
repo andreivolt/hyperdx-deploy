@@ -22,12 +22,12 @@ hyperdx:
   ingress:
     # Sibling manifests/ingress.yaml mints the traefik route.
     enabled: false
-  # Skip team-setup / login — tailnet-only ingress makes auth redundant
-  # (same pattern as Grafana's anonymous mode). HyperDX OSS v2 honors
-  # IS_LOCAL_MODE_ENABLED to bypass the auth wall entirely.
-  env:
-    - name: IS_LOCAL_MODE_ENABLED
-      value: "true"
+  # No auth-disable env here: HyperDX OSS v2 has no anonymous mode, and its
+  # IS_LOCAL_MODE is a build-time NEXT_PUBLIC flag baked into the standard image
+  # as false (a runtime IS_LOCAL_MODE_ENABLED env is inert — it was set here
+  # before and never bypassed the login screen). The no-login behaviour is done
+  # at the ingress instead, by injecting a valid session cookie — see
+  # manifests/middleware-auto-login.yaml.
 
 mongodb:
   enabled: true

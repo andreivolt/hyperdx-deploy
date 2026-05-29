@@ -39,6 +39,25 @@ mirrored `*.volt.tail.avolt.net` wildcard cert (no per-host cert-manager
 annotation needed; reflector reflects the Secret into the `hyperdx`
 namespace).
 
+## No-login access (Grafana-style)
+
+The UI opens straight into the app with no login screen, the same outcome
+as Grafana's anonymous-admin. HyperDX OSS v2 gets there differently because
+it has **no anonymous / no-auth / declarative-credentials mode** for the
+split multi-component deployment (upstream issue hyperdxio/hyperdx#1329 is
+open and unaddressed; its only auth-less path, `IS_LOCAL_MODE`, is a
+build-time `NEXT_PUBLIC` flag baked `false` into the standard image and ships
+as an all-in-one localStorage container — incompatible with this chart).
+
+Instead `manifests/middleware-auto-login.yaml` injects a valid HyperDX
+session cookie at the traefik layer. HyperDX uses express-session
+(`connect.sid`) backed by connect-mongo with `rolling:true` and a 30-day
+maxAge, so one server-validated session renews on every request and never
+lapses. The `tailnet-only` ipAllowList sibling pins the host to Tailscale
+IPs, so the injected session is only reachable from the tailnet (the cookie
+is a plaintext shared credential, same posture as Grafana's `adminPassword`).
+Re-mint instructions are in the middleware file's header comment.
+
 ## Install
 
 ```sh

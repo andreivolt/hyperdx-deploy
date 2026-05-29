@@ -9,6 +9,11 @@ metadata:
     # cert-manager.io annotation needed.
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
+    # tailnet-only gates the host to Tailscale IPs; hyperdx-auto-login then
+    # injects andrei's session cookie so the UI opens with no login form
+    # (HyperDX has no anonymous mode — see manifests/middleware-auto-login.yaml).
+    # Order matters: reject non-tailnet sources before handing out a session.
+    traefik.ingress.kubernetes.io/router.middlewares: hyperdx-tailnet-only@kubernetescrd,hyperdx-hyperdx-auto-login@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
