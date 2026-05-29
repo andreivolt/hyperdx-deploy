@@ -29,3 +29,36 @@ spec:
                 name: hyperdx-hdx-oss-v2-app
                 port:
                   number: 3000
+---
+# Public OTLP/HTTP ingest for browser RUM (session replay, frontend traces,
+# errors). The UI host above is tailnet-only (100.64/10), so a browser on the
+# public internet can't post telemetry there. This exposes the collector's
+# :4318 OTLP/HTTP receiver on a public host under the *.alimcompta.avolt.net
+# wildcard (A 51.77.133.85), covered by the reflected wildcard-alimcompta cert.
+# The collector already does CORS allowed_origins/headers '*' and bearer auth
+# (the bearer token is the team ingestion API key the browser SDK sends).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hyperdx-otel
+  namespace: hyperdx
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - otel.alimcompta.avolt.net
+      secretName: wildcard-alimcompta-avolt-net-tls
+  rules:
+    - host: otel.alimcompta.avolt.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hyperdx-hdx-oss-v2-otel-collector
+                port:
+                  number: 4318
