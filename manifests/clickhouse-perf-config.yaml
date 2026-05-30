@@ -52,16 +52,12 @@ data:
            thousands of threads. Still ample headroom over steady state. -->
       <max_thread_pool_size>256</max_thread_pool_size>
 
-      <!-- Disable the sampling query profiler. It wrote a trace_log row per
-           CPU/memory sample (391 MiB and climbing) that nothing here reads,
-           and the sampling + the merges of trace_log were a chunk of the idle
-           burn. Setting the periods to 0 turns it off globally. -->
-      <query_profiler_real_time_period_ns>0</query_profiler_real_time_period_ns>
-      <query_profiler_cpu_time_period_ns>0</query_profiler_cpu_time_period_ns>
-
-      <!-- Quiet the self-monitoring system logs HyperDX never queries. trace_log
-           is fed by the now-disabled profiler; the rest flush every 7.5s and
-           then merge forever. Removing each table element disables that log.
+      <!-- Quiet the self-monitoring system logs HyperDX never queries. Removing
+           trace_log gives the sampling profiler nowhere to write, so its rows
+           (391 MiB and climbing) and their merges vanish — no need to also
+           flip the profiler's user-level period settings (those live in
+           users.d profiles, not here). The rest flush every 7.5s and then
+           merge forever. Removing each table element disables that log.
            query_log is KEPT (small, and useful for the kind of investigation
            that found this) but flushed less often to cut merge frequency. -->
       <trace_log remove="remove"/>
