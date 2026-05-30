@@ -9,6 +9,10 @@
 #      (ClickHouse auto-loads everything in config.d/).
 #   3. volume: backing ConfigMap reference.
 #
+# Also mounts the sibling clickhouse-perf-config ConfigMap as perf.xml in the
+# same config.d/ dir — thread-pool right-sizing + self-monitoring-log quieting
+# that stopped ClickHouse's ~67% idle CPU burn. See clickhouse-perf-config.yaml.
+#
 # kustomize merges list items by their `name` key (container, volume,
 # volumeMount), so this is additive — it doesn't disturb the chart's
 # existing config/users/data/logs mounts.
@@ -28,7 +32,13 @@ spec:
             - name: storage-config
               mountPath: /etc/clickhouse-server/config.d/storage.xml
               subPath: storage.xml
+            - name: perf-config
+              mountPath: /etc/clickhouse-server/config.d/perf.xml
+              subPath: perf.xml
       volumes:
         - name: storage-config
           configMap:
             name: hyperdx-clickhouse-storage-config
+        - name: perf-config
+          configMap:
+            name: hyperdx-clickhouse-perf-config

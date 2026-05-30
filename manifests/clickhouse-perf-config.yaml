@@ -1,0 +1,86 @@
+# Sidecar ConfigMap holding ClickHouse performance/right-sizing overrides.
+# Mounted at /etc/clickhouse-server/config.d/perf.xml via the strategic-merge
+# patch in clickhouse-storage-patch.yaml (ClickHouse auto-loads config.d/).
+#
+# Why this exists: on volt (a chronically IO-saturated single-node k3s box)
+# the bundled HyperDX ClickHouse burned a steady ~410m / ~67% of a core while
+# *idle* — 0 user queries of substance, ~472 MiB of data, 0 stuck merges. The
+# burn was self-generated overhead, two compounding causes:
+#
+#   1. Self-monitoring churn. ClickHouse's own system.*_log tables
+#      (trace_log, metric_log, asynchronous_metric_log, processors_profile_log,
+#      part_log, ...) flush every ~7.5s and are then continuously MergeTree-
+#      merged. trace_log alone had grown to 391 MiB because the CPU+memory
+#      sampling query profiler writes a row per sample. A CPU stack profile
+#      attributed 99.7% of sampled CPU to MergeTree merge/read code paths —
+#      mostly merging these diagnostic tables and the OTel self-telemetry the
+#      collector scrapes off ClickHouse's own :9363 endpoint every 30s. HyperDX
+#      never reads system.*_log, so this is pure waste here.
+#
+#   2. Oversized thread pools. ClickHouse sees the host's 8 logical cores (not
+#      its cgroup sliver) and sized its pools accordingly: background_schedule_
+#      pool_size 512, max_thread_pool_size 10000, 16 merge threads — yielding
+#      ~785 global / ~660 active threads all waking on timers. On a node that
+#      only ever runs a trickle of inserts that's hundreds of idle threads
+#      spinning the scheduler.
+#
+# This override (a) disables/quiets the self-diagnostic logs HyperDX doesn't
+# use, and (b) right-sizes the pools to the node. It touches only ClickHouse
+# internal diagnostics + concurrency knobs — no data, schema, or query
+# behaviour changes, so session replay and all HyperDX queries are unaffected.
+# Fully reversible: delete the file and restart.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hyperdx-clickhouse-perf-config
+data:
+  perf.xml: |
+    <?xml version="1.0"?>
+    <clickhouse>
+      <!-- Right-size background pools to this small, shared node. Defaults are
+           derived from the host's 8 cores and are wildly oversized for a box
+           that ingests a trickle of telemetry. These cap the thread sprawl
+           that was spinning the scheduler. -->
+      <background_pool_size>4</background_pool_size>
+      <background_schedule_pool_size>16</background_schedule_pool_size>
+      <background_common_pool_size>4</background_common_pool_size>
+      <background_fetches_pool_size>2</background_fetches_pool_size>
+      <background_buffer_flush_schedule_pool_size>4</background_buffer_flush_schedule_pool_size>
+      <background_message_broker_schedule_pool_size>2</background_message_broker_schedule_pool_size>
+      <background_distributed_schedule_pool_size>2</background_distributed_schedule_pool_size>
+      <!-- Hard ceiling on the global thread pool so a burst can't re-spawn
+           thousands of threads. Still ample headroom over steady state. -->
+      <max_thread_pool_size>256</max_thread_pool_size>
+
+      <!-- Disable the sampling query profiler. It wrote a trace_log row per
+           CPU/memory sample (391 MiB and climbing) that nothing here reads,
+           and the sampling + the merges of trace_log were a chunk of the idle
+           burn. Setting the periods to 0 turns it off globally. -->
+      <query_profiler_real_time_period_ns>0</query_profiler_real_time_period_ns>
+      <query_profiler_cpu_time_period_ns>0</query_profiler_cpu_time_period_ns>
+
+      <!-- Quiet the self-monitoring system logs HyperDX never queries. trace_log
+           is fed by the now-disabled profiler; the rest flush every 7.5s and
+           then merge forever. Removing each table element disables that log.
+           query_log is KEPT (small, and useful for the kind of investigation
+           that found this) but flushed less often to cut merge frequency. -->
+      <trace_log remove="remove"/>
+      <metric_log remove="remove"/>
+      <asynchronous_metric_log remove="remove"/>
+      <processors_profile_log remove="remove"/>
+      <opentelemetry_span_log remove="remove"/>
+      <query_views_log remove="remove"/>
+
+      <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </query_log>
+      <part_log>
+        <database>system</database>
+        <table>part_log</table>
+        <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </part_log>
+    </clickhouse>

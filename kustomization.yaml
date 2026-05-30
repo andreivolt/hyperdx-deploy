@@ -30,6 +30,7 @@ resources:
   - manifests/ingress.yaml
   - manifests/middleware-auto-login.yaml
   - manifests/clickhouse-storage-config.yaml
+  - manifests/clickhouse-perf-config.yaml
   - secrets/hyperdx-s3.sops.yaml
 
 patches:

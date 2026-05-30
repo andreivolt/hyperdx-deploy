@@ -46,6 +46,13 @@ clickhouse:
       cpu: 100m
       memory: 512Mi
     limits:
+      # Hard CPU ceiling. ClickHouse sees the host's 8 cores and otherwise
+      # over-threads + self-monitors itself into a steady ~410m idle burn on
+      # this IO-saturated single node (see manifests/clickhouse-perf-config.yaml
+      # for the thread-pool / system-log fixes that address the cause). Actual
+      # HyperDX query load here is a few tens of millicores, so 1 core is ample
+      # headroom and just caps runaway background churn.
+      cpu: "1"
       memory: 2Gi
   persistence:
     enabled: true
