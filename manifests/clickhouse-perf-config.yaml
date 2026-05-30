@@ -57,6 +57,15 @@ data:
            thousands of threads. Still ample headroom over steady state. -->
       <max_thread_pool_size>256</max_thread_pool_size>
 
+      <!-- Scrape the async metrics every 30s instead of every 1s. The default
+           1s recomputes ~220 metrics (per-CPU /proc reads across all 8 host
+           cores, disk/mem stats) every second and is a real chunk of the idle
+           floor. The only consumer is the OTel collector's prometheus receiver,
+           which scrapes ClickHouse's :9363 endpoint every 30s — so 1s
+           resolution is wasted work. Matching the scrape interval keeps the
+           dashboards identical while removing 29/30 of the recomputes. -->
+      <asynchronous_metrics_update_period_s>30</asynchronous_metrics_update_period_s>
+
       <!-- Quiet the self-monitoring system logs HyperDX never queries. Removing
            trace_log gives the sampling profiler nowhere to write, so its rows
            (391 MiB and climbing) and their merges vanish — no need to also
