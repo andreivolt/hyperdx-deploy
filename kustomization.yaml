@@ -40,3 +40,13 @@ patches:
       version: v1
       kind: Deployment
       name: hyperdx-hdx-oss-v2-clickhouse
+  # Park the whole HyperDX stack at 0 replicas. The chart's per-component
+  # `replicas` values can't express this (it does `replicas | default 1`, so 0
+  # is dropped back to 1), hence a kustomize replicas-patch over all four
+  # Deployments. PVCs are standalone chart resources and untouched.
+  - path: manifests/scale-to-zero.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "hyperdx-hdx-oss-v2-(app|otel-collector|mongodb|clickhouse)"

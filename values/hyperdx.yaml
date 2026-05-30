@@ -72,5 +72,7 @@ otel:
     limits:
       memory: 512Mi
 
+# check-alerts CronJob — off while the stack is parked (nothing to alert on
+# with the app/clickhouse at 0; it was spawning a job per minute otherwise).
 tasks:
-  enabled: true
+  enabled: false
