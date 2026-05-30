@@ -41,7 +41,12 @@ data:
            derived from the host's 8 cores and are wildly oversized for a box
            that ingests a trickle of telemetry. These cap the thread sprawl
            that was spinning the scheduler. -->
-      <background_pool_size>4</background_pool_size>
+      <!-- Left at the default 16 (not lowered): ClickHouse requires
+           background_pool_size * background_merges_mutations_concurrency_ratio
+           to exceed number_of_free_entries_in_pool_to_execute_mutation (20) or
+           it refuses to start, and merge threads only spawn on demand anyway —
+           they weren't the idle burn. The schedule pool below was. -->
+      <background_pool_size>16</background_pool_size>
       <background_schedule_pool_size>16</background_schedule_pool_size>
       <background_common_pool_size>4</background_common_pool_size>
       <background_fetches_pool_size>2</background_fetches_pool_size>
