@@ -71,22 +71,6 @@ otel:
       memory: 256Mi
     limits:
       memory: 512Mi
-  # Kill the ClickHouse self-scrape loop. The collector's OpAMP config (pushed by
-  # the app, hardcoded in opampController.ts) builds a `prometheus` receiver
-  # scraping two static targets — the collector's own :8888 and
-  # ${env:CLICKHOUSE_PROMETHEUS_METRICS_ENDPOINT} (ClickHouse's :9363) — then
-  # re-inserts every sample back into otel_metrics_* on the same ClickHouse. That
-  # ClickHouse scrape alone is ~1559 series every 30s → ~600 tiny parts/hour and
-  # ~225s of MergeParts/hour on volt's fsync-bound HDD, while real apps
-  # (alimcompta) send 0 telemetry. The receiver and its env target are hardcoded
-  # in the app's OpAMP config and can't be removed from the chart, but this env
-  # is the one knob: pointing it at the collector's own :8888 makes the second
-  # target identical to the first, so the prometheus receiver deduplicates them
-  # into a single harmless self-scrape and never touches ClickHouse. otlp +
-  # fluentforward receivers are untouched, so alimcompta telemetry still flows.
-  # (clickhouse.prometheus.enabled stays true only because the chart gates this
-  # env block on it; ClickHouse's now-unscraped :9363 endpoint costs nothing.)
-  clickhousePrometheusEndpoint: "0.0.0.0:8888"
 
 # check-alerts CronJob — off while the stack is parked (nothing to alert on
 # with the app/clickhouse at 0; it was spawning a job per minute otherwise).
